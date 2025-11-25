@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Dashboard Arduino HC-05</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
+                </svg>
+                <h1>Arduino Dashboard</h1>
+            </div>
+            <div class="header-subtitle">Monitor de datos HC-05 Bluetooth</div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="container">
+        <!-- Connection Status Card -->
+        <div class="card status-card">
+            <div class="card-header">
+                <h2>Estado de Conexión</h2>
+                <div class="connection-indicator">
+                    <span class="indicator-dot" id="indicatorDot"></span>
+                    <span class="status-text" id="statusText">Desconectado</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="connection-info">
+                    <div class="info-item">
+                        <span class="info-label">Tipo:</span>
+                        <span class="info-value" id="connectionType">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Dirección:</span>
+                        <span class="info-value" id="connectionAddress">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="grid">
+            <!-- Left Column - Data Monitor -->
+            <div class="grid-left">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Monitor de Datos</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-icon" id="clearBtn" title="Limpiar log">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                                </svg>
+                            </button>
+                            <button class="btn btn-icon" id="downloadBtn" title="Descargar log">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="log-container" id="logContainer"></div>
+                        <div class="log-stats">
+                            <span id="logLines">0 líneas</span>
+                            <span id="logSize">0 KB</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Data Visualization -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Visualización de Datos</h2>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="dataChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column - Controls -->
+            <div class="grid-right">
+                <!-- Connection Settings -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Configuración</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="baudRate">Velocidad (Baudios)</label>
+                            <select id="baudRate" class="form-select">
+                                <option value="9600">9600</option>
+                                <option value="19200">19200</option>
+                                <option value="38400">38400</option>
+                                <option value="57600">57600</option>
+                                <option value="115200">115200</option>
+                            </select>
+                        </div>
+
+                        <div class="info-box">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 16v-4M12 8h.01"/>
+                            </svg>
+                            <p>Asegúrate de que el HC-05 esté conectado por USB o adaptador serial a tu PC.</p>
+                        </div>
+
+                        <button class="btn btn-primary btn-block" id="connectBtn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>
+                            </svg>
+                            Conectar
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Send Commands -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Enviar Comando</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label for="cmdInput">Comando al Arduino</label>
+                            <input type="text" id="cmdInput" class="form-input" placeholder="Ejemplo: LED_ON">
+                        </div>
+                        <button class="btn btn-secondary btn-block" id="sendBtn" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                            </svg>
+                            Enviar
+                        </button>
+
+                        <div class="quick-commands">
+                            <h3>Comandos Rápidos</h3>
+                            <div class="quick-btns">
+                                <button class="btn btn-quick" data-cmd="<RST>">Reset</button>
+                                <button class="btn btn-quick" data-cmd="<STATUS>">Status</button>
+                                <button class="btn btn-quick" data-cmd="<TEST>">Test</button>
+                                <button class="btn btn-quick" data-cmd="<INFO>">Info</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Display Options -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Opciones de Visualización</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="toggle-group">
+                            <label class="toggle">
+                                <input type="checkbox" id="autoScroll" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Auto-scroll</span>
+                            </label>
+
+                            <label class="toggle">
+                                <input type="checkbox" id="showTimestamp" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Mostrar timestamp</span>
+                            </label>
+
+                            <label class="toggle">
+                                <input type="checkbox" id="showTokens" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Mostrar tokens</span>
+                            </label>
+
+                            <label class="toggle">
+                                <input type="checkbox" id="colorizeLog">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Colorear log</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Info -->
+                <div class="card card-info">
+                    <div class="card-body">
+                        <h3>Información del Sistema</h3>
+                        <div class="info-grid">
+                            <div class="info-stat">
+                                <span class="stat-label">Mensajes</span>
+                                <span class="stat-value" id="msgCount">0</span>
+                            </div>
+                            <div class="info-stat">
+                                <span class="stat-label">Uptime</span>
+                                <span class="stat-value" id="uptime">00:00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help Section -->
+        <div class="card card-help">
+            <div class="card-header">
+                <h2>Ayuda</h2>
+            </div>
+            <div class="card-body">
+                <div class="help-content">
+                    <div class="help-item">
+                        <h3>🔌 Conexión Serial Bluetooth</h3>
+                        <p>Esta página usa la <strong>Web Serial API</strong> para conectarse directamente al HC-05 sin necesidad de scripts adicionales.</p>
+                        <p>Presiona "Conectar" y selecciona el puerto COM del HC-05 en el diálogo del navegador.</p>
+                    </div>
+                    <div class="help-item">
+                        <h3>⚙️ Configuración del HC-05</h3>
+                        <p>Asegúrate de que el HC-05 esté:</p>
+                        <ul style="margin-left: 20px; margin-top: 8px;">
+                            <li>Emparejado con tu PC</li>
+                            <li>Conectado como puerto COM serial</li>
+                            <li>Configurado a 9600 baudios (o ajusta la velocidad en el selector)</li>
+                        </ul>
+                    </div>
+                    <div class="help-item">
+                        <h3>🌐 Compatibilidad</h3>
+                        <p>Requiere navegadores compatibles con Web Serial API: <strong>Chrome, Edge o Opera</strong>.</p>
+                        <p>No funciona en Firefox, Safari ni en navegadores móviles.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>&copy; 2025 Arduino Dashboard | Optimizado para HC-05 Bluetooth</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
