@@ -11,7 +11,8 @@ const state = {
     logLines: 0,
     logSize: 0,
     startTime: null,
-    uptimeInterval: null
+    uptimeInterval: null,
+    buffer: '' // Buffer para acumular datos entrantes
 };
 
 // Elementos del DOM
@@ -218,17 +219,43 @@ async function disconnect() {
 // ============================================
 
 function handleIncomingData(data) {
-    state.messageCount++;
-    elements.msgCount.textContent = state.messageCount;
+    // Agregar datos al buffer
+    state.buffer += data;
     
-    // Procesar tokens especiales si está deshabilitado
-    let processedData = data;
-    if (!elements.showTokens.checked) {
-        processedData = processedData.replace(/<EN>/g, '\n').replace(/<BK>/g, '');
+    // Procesar líneas completas
+    let lines = state.buffer.split('\n');
+    
+    // La última parte puede estar incompleta, guardarla en el buffer
+    state.buffer = lines.pop() || '';
+    
+    // Procesar cada línea completa
+    lines.forEach(line => {
+        if (line) {
+            state.messageCount++;
+            elements.msgCount.textContent = state.messageCount;
+            
+            // Procesar tokens especiales si está deshabilitado
+            let processedData = line;
+            if (!elements.showTokens.checked) {
+                processedData = processedData.replace(/<EN>/g, '\n').replace(/<BK>/g, '');
+            }
+            
+            appendLog(processedData + '\n');
+            updateChartData(line);
+        }
+    });
+    
+    // Si el buffer es muy largo sin saltos de línea, mostrarlo de todos modos
+    if (state.buffer.length > 100) {
+        let processedData = state.buffer;
+        if (!elements.showTokens.checked) {
+            processedData = processedData.replace(/<EN>/g, '\n').replace(/<BK>/g, '');
+        }
+        appendLog(processedData);
+        state.buffer = '';
+        state.messageCount++;
+        elements.msgCount.textContent = state.messageCount;
     }
-    
-    appendLog(processedData);
-    updateChartData(data);
 }
 
 function appendLog(text) {
