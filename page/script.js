@@ -12,7 +12,8 @@ const state = {
     logSize: 0,
     startTime: null,
     uptimeInterval: null,
-    buffer: '' // Buffer para acumular datos entrantes
+    buffer: '', // Buffer para acumular datos entrantes
+    bufferTimeout: null // Timeout para flush del buffer
 };
 
 // Elementos del DOM
@@ -138,26 +139,79 @@ async function connectSerial() {
         state.port = await navigator.serial.requestPort();
         
         const baudRate = parseInt(elements.baudRate.value);
-        await state.port.open({ baudRate });
+        
+        // Configuración simplificada para compatibilidad con Bluetooth HC-05
+        const portConfig = {
+            baudRate: baudRate
+        };
+        
+        appendLog(`🔄 Abriendo puerto a ${baudRate} baudios...\n`);
+        
+        try {
+            await state.port.open(portConfig);
+        } catch (openError) {
+            // Si falla con la configuración simple, reintentar con parámetros explícitos
+            appendLog(`⚠️ Reintentando con configuración alternativa...\n`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            const altConfig = {
+                baudRate: baudRate,
+                dataBits: 8,
+                stopBits: 1,
+                parity: 'none',
+                flowControl: 'none'
+            };
+            
+            await state.port.open(altConfig);
+        }
         
         updateStatus('Conectado', 'connected');
         updateConnectionInfo('Serial (HC-05)', `${baudRate} baudios`);
         elements.connectBtn.textContent = 'Desconectar';
         elements.sendBtn.disabled = false;
         state.connected = true;
+        state.buffer = ''; // Limpiar buffer
         startUptime();
         
         appendLog('✅ Conectado al puerto serial\n');
         showNotification('Conectado exitosamente', 'success');
+        
+        // Dar tiempo al puerto para estabilizarse (importante para Bluetooth)
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         // Iniciar lectura de datos
         readSerialData();
         
     } catch (error) {
         console.error('Serial error:', error);
-        appendLog(`❌ Error: ${error.message}\n`);
+        
+        // Mensaje de error más descriptivo
+        let errorMsg = '❌ Error al conectar:\n';
+        if (error.message.includes('Failed to open') || error.name === 'NetworkError') {
+            errorMsg += '   • El puerto está siendo usado por otro programa\n';
+            errorMsg += '   • Cierra Python, Arduino IDE, o cualquier Serial Monitor\n';
+            errorMsg += '   • Para HC-05: Verifica que el LED parpadee (modo emparejado)\n';
+            errorMsg += '   • Intenta desemparejar y reemparejar el Bluetooth\n';
+        } else if (error.message.includes('No port selected')) {
+            errorMsg += '   • Debes seleccionar un puerto\n';
+        } else {
+            errorMsg += `   ${error.message}\n`;
+        }
+        
+        appendLog(errorMsg);
         showNotification('Error al conectar', 'error');
-        disconnect();
+        
+        // Limpiar estado
+        if (state.port) {
+            try {
+                await state.port.close();
+            } catch (e) {
+                // Ignorar errores al cerrar
+            }
+        }
+        state.port = null;
+        state.connected = false;
+        updateStatus('Desconectado', 'disconnected');
     }
 }
 
@@ -222,40 +276,52 @@ function handleIncomingData(data) {
     // Agregar datos al buffer
     state.buffer += data;
     
-    // Procesar líneas completas
+    // Limpiar timeout previo
+    if (state.bufferTimeout) {
+        clearTimeout(state.bufferTimeout);
+    }
+    
+    // Procesar líneas completas inmediatamente
     let lines = state.buffer.split('\n');
     
-    // La última parte puede estar incompleta, guardarla en el buffer
-    state.buffer = lines.pop() || '';
-    
-    // Procesar cada línea completa
-    lines.forEach(line => {
-        if (line) {
+    // Si hay líneas completas (más de un elemento después del split)
+    if (lines.length > 1) {
+        // La última parte puede estar incompleta, guardarla en el buffer
+        state.buffer = lines.pop() || '';
+        
+        // Procesar cada línea completa con un solo timestamp
+        const allLines = lines.filter(line => line.trim()).join('\n');
+        if (allLines) {
             state.messageCount++;
             elements.msgCount.textContent = state.messageCount;
             
             // Procesar tokens especiales si está deshabilitado
-            let processedData = line;
+            let processedData = allLines;
             if (!elements.showTokens.checked) {
                 processedData = processedData.replace(/<EN>/g, '\n').replace(/<BK>/g, '');
             }
             
             appendLog(processedData + '\n');
-            updateChartData(line);
+            updateChartData(allLines);
         }
-    });
-    
-    // Si el buffer es muy largo sin saltos de línea, mostrarlo de todos modos
-    if (state.buffer.length > 100) {
-        let processedData = state.buffer;
-        if (!elements.showTokens.checked) {
-            processedData = processedData.replace(/<EN>/g, '\n').replace(/<BK>/g, '');
-        }
-        appendLog(processedData);
-        state.buffer = '';
-        state.messageCount++;
-        elements.msgCount.textContent = state.messageCount;
     }
+    
+    // Configurar timeout para flush del buffer
+    // Aumentado a 500ms para acumular más datos antes de mostrar
+    state.bufferTimeout = setTimeout(() => {
+        if (state.buffer.length > 0) {
+            let processedData = state.buffer;
+            if (!elements.showTokens.checked) {
+                processedData = processedData.replace(/<EN>/g, '\n').replace(/<BK>/g, '');
+            }
+            
+            appendLog(processedData);
+            
+            state.buffer = '';
+            state.messageCount++;
+            elements.msgCount.textContent = state.messageCount;
+        }
+    }, 500); // 500ms para acumular más caracteres
 }
 
 function appendLog(text) {
@@ -263,34 +329,52 @@ function appendLog(text) {
         ? `[${new Date().toLocaleTimeString()}] ` 
         : '';
     
+    // Escapar HTML para evitar inyección
+    const escapeHtml = (str) => {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    };
+    
     // Colorear según el contenido si está habilitado
     let logEntry = timestamp + text;
     
     if (elements.colorizeLog.checked) {
+        const escapedEntry = escapeHtml(logEntry);
+        
         if (text.includes('ERROR') || text.includes('❌')) {
-            logEntry = `<span class="log-error">${logEntry}</span>`;
+            logEntry = `<span class="log-error">${escapedEntry}</span>`;
         } else if (text.includes('WARNING') || text.includes('⚠️')) {
-            logEntry = `<span class="log-warning">${logEntry}</span>`;
+            logEntry = `<span class="log-warning">${escapedEntry}</span>`;
         } else if (text.includes('SUCCESS') || text.includes('✅')) {
-            logEntry = `<span class="log-success">${logEntry}</span>`;
+            logEntry = `<span class="log-success">${escapedEntry}</span>`;
         } else if (text.includes('INFO') || text.includes('ℹ️') || text.includes('💡')) {
-            logEntry = `<span class="log-info">${logEntry}</span>`;
+            logEntry = `<span class="log-info">${escapedEntry}</span>`;
+        } else {
+            logEntry = escapedEntry;
         }
         
-        elements.logContainer.innerHTML += logEntry;
+        // Usar insertAdjacentHTML para mejor rendimiento
+        elements.logContainer.insertAdjacentHTML('beforeend', logEntry);
     } else {
         elements.logContainer.textContent += logEntry;
     }
     
-    // Update stats
+    // Update stats (optimizado - no calcular en cada append)
     state.logLines++;
-    state.logSize = new Blob([elements.logContainer.textContent]).size;
-    elements.logLines.textContent = `${state.logLines} líneas`;
-    elements.logSize.textContent = `${(state.logSize / 1024).toFixed(2)} KB`;
     
-    // Auto-scroll
+    // Actualizar tamaño solo cada 10 líneas para mejor rendimiento
+    if (state.logLines % 10 === 0) {
+        state.logSize = new Blob([elements.logContainer.textContent]).size;
+        elements.logLines.textContent = `${state.logLines} líneas`;
+        elements.logSize.textContent = `${(state.logSize / 1024).toFixed(2)} KB`;
+    }
+    
+    // Auto-scroll (usar requestAnimationFrame para mejor rendimiento)
     if (elements.autoScroll.checked) {
-        elements.logContainer.scrollTop = elements.logContainer.scrollHeight;
+        requestAnimationFrame(() => {
+            elements.logContainer.scrollTop = elements.logContainer.scrollHeight;
+        });
     }
 }
 

